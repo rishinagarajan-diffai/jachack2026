@@ -1,3 +1,5 @@
 .jac/
 jac.local.toml
 .DS_Store
+*.orig
+*.bak
