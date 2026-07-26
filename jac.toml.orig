@@ -11,6 +11,3 @@ types-requests = "~=2.33"
 
 [dev-dependencies]
 watchdog = ">=3.0.0"
-
-[check.lint]
-select = ["all"]

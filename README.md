@@ -37,6 +37,21 @@ Three things this would have been meaningfully worse without.
 
 ---
 
+## Develop
+
+```bash
+jac check .            # type check
+jac check . --lint     # lint (add --fix to auto-fix)
+jac fmt .              # format
+jac test score.test.jac
+```
+
+`[check.lint] select = ["all"]` is set in `jac.toml`. The upstream
+[jac_site](https://github.com/jaseci-labs/jac_site) additionally enables
+`strip-comments` and `strip-docstrings`, which delete every comment and
+docstring from `.jac` files. Not enabled here: the comments in this repo carry
+information a reader needs.
+
 ## Run it
 
 Requires [Jac](https://docs.jaseci.org/quick-guide/install/).
@@ -74,6 +89,7 @@ No API key is needed for anything in this repo. OpenAlex is open.
 | `viz_template.html` | 2D and 3D canvas renderer, zero dependencies |
 | `build.jac` | `Trace` then `Export` |
 | `main.sv.jac` | Server entry point, endpoints not wired yet |
+| `score.test.jac` | Test annex, 9 tests, no network required |
 
 ## Scoring
 

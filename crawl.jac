@@ -6,13 +6,13 @@ so we crawl the API once and traverse locally for the rest of the day.
 
 import os;
 import requests;
-import from model { Paper, Cites }
+import from model { Paper, Cites, PaperView }
 
-glob API: str = "https://api.openalex.org";
-# OpenAlex asks for a contact address to put you in its faster "polite pool".
-# Kept in the environment so it is not committed: export OPENALEX_MAILTO=you@example.com
-glob MAILTO: str = os.environ.get("OPENALEX_MAILTO", "");
-glob SELECT: str = "id,doi,title,publication_year,cited_by_count,is_retracted";
+# OPENALEX_MAILTO puts requests in OpenAlex's faster polite pool. Read from the
+# environment so a contact address is never committed.
+glob API: str = "https://api.openalex.org",
+     MAILTO: str = os.environ.get("OPENALEX_MAILTO", ""),
+     SELECT: str = "id,doi,title,publication_year,cited_by_count,is_retracted";
 
 
 # OpenAlex ids come back as full URLs; keep the W-number.
@@ -20,69 +20,77 @@ def short_id(full: str) -> str {
     return full.split("/")[-1];
 }
 
-def polite(extra: dict) -> dict {
-    if MAILTO { extra["mailto"] = MAILTO; }
+def polite(extra: dict[str, any]) -> dict[str, any] {
+    if MAILTO {
+        extra["mailto"] = MAILTO;
+    }
     return extra;
 }
 
-def fetch_work(wid: str) -> dict {
+def fetch_work(wid: str) -> dict[str, any] {
     r = requests.get(
-        f"{API}/works/{wid}",
-        params=polite({"select": SELECT}),
-        timeout=30
+        f"{API}/works/{wid}", params=polite({"select": SELECT}), timeout=30
     );
     r.raise_for_status();
-    return r.json() as dict;
+    return r.json() as dict[str, any];
 }
 
 # Papers citing `wid`, richest-cited first so a cap keeps the influential ones.
-def fetch_citers(wid: str, limit: int) -> list[dict] {
+def fetch_citers(wid: str, limit: int) -> list[dict[str, any]] {
     r = requests.get(
         f"{API}/works",
-        params=polite({
-            "filter": f"cites:{wid}",
-            "per-page": limit,
-            "sort": "cited_by_count:desc",
-            "select": SELECT
-        }),
+        params=polite(
+            {
+                "filter": f"cites:{wid}",
+                "per-page": limit,
+                "sort": "cited_by_count:desc",
+                "select": SELECT
+            }
+        ),
         timeout=60
     );
     r.raise_for_status();
-    payload = r.json() as dict;
-    return payload["results"] as list[dict];
+    payload = r.json() as dict[str, any];
+    return payload["results"] as list[dict[str, any]];
 }
 
 def find_paper(wid: str) -> Paper | None {
-    hits = [root -->[?:Paper, openalex_id == wid]];
-    if hits { return hits[0]; }
+    hits = [root-->[?:Paper, openalex_id==wid]];
+    if hits {
+        return hits[0];
+    }
     return None;
 }
 
 # Get-or-create by OpenAlex id. Idempotent, so re-crawling never duplicates.
-def upsert(row: dict, hop: int) -> Paper {
+def upsert(row: dict[str, any], hop: int) -> Paper {
     wid = short_id(row["id"] as str);
     found = find_paper(wid);
     if found is not None {
-        if hop < found.hop { found.hop = hop; }
+        if hop < found.hop {
+            found.hop = hop;
+        }
         return found;
     }
     raw_title = row.get("title") or "(untitled)";
-    return (root ++> Paper(
-        openalex_id=wid,
-        title=raw_title as str,
-        year=(row.get("publication_year") or 0) as int,
-        cited_by_count=(row.get("cited_by_count") or 0) as int,
-        is_retracted=(row.get("is_retracted") or False) as bool,
-        hop=hop
-    )) as Paper;
+    return (
+        root ++> Paper(
+            openalex_id=wid,
+            title=raw_title as str,
+            year=(row.get("publication_year") or 0) as int,
+            cited_by_count=(row.get("cited_by_count") or 0) as int,
+            is_retracted=(row.get("is_retracted") or False) as bool,
+            hop=hop
+        )
+    ) as Paper;
 }
 
 
 """Mark one paper as the overturned origin."""
 walker Seed {
-    has wid: str;
-    has reason: str = "retracted";
-    has reports: list[dict] = [];
+    has wid: str,
+        reason: str = "retracted",
+        reports: list[PaperView] = [];
 
     can go with Root entry {
         row = fetch_work(self.wid);
@@ -91,22 +99,16 @@ walker Seed {
         p.overturn_reason = self.reason;
         p.hop = 0;
         p.inconsistency = 1.0;
-        report {
-            "id": p.openalex_id,
-            "title": p.title,
-            "year": p.year,
-            "cited_by_count": p.cited_by_count,
-            "is_retracted": p.is_retracted
-        };
+        report p.view();
     }
 }
 
 
 """One hop upward: pull the papers citing `wid` and wire them in."""
 walker Expand {
-    has wid: str;
-    has limit: int = 40;
-    has reports: list[dict] = [];
+    has wid: str,
+        limit: int = 40,
+        reports: list[dict[str, any]] = [];
 
     can go with Root entry {
         target = find_paper(self.wid);
@@ -119,9 +121,13 @@ walker Expand {
         added = 0;
         for row in rows {
             citer = upsert(row, next_hop);
-            if citer.openalex_id == target.openalex_id { continue; }
-            already = [citer ->:Cites:->[?:Paper, openalex_id == target.openalex_id]];
-            if already { continue; }
+            if citer.openalex_id == target.openalex_id {
+                continue;
+            }
+            already = [citer->:Cites:->[?:Paper, openalex_id==target.openalex_id]];
+            if already {
+                continue;
+            }
             citer +>:Cites():+> target;
             added += 1;
         }

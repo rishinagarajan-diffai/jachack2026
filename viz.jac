@@ -1,95 +1,122 @@
 """Export the scored graph as a self-contained HTML page.
 
-Reads Papers and Cites off the persistent graph, inlines one JSON payload
-into viz_template.html, and writes graph.html. No server, no CDN, no CORS.
+Reads Papers and Cites off the persistent graph, inlines one JSON payload into
+viz_template.html, and writes graph.html. No server, no CDN, no CORS.
 """
 
 import json;
-import from model { Paper, Cites }
-import from score { priority_of }
+import from model { Paper, Cites, PaperView }
 
+obj GraphMeta {
+    has seed_title: str = "No seed selected",
+        seed_cites: int = 0,
+        verified: bool = False,
+        n_papers: int = 0,
+        n_edges: int = 0,
+        top_cites: int = 0,
+        retracted_downstream: int = 0;
+}
 
-def node_row(p: Paper) -> dict {
+obj GraphPayload {
+    has nodes: list[PaperView] = [],
+        links: list[dict[str, str]] = [],
+        meta: GraphMeta = GraphMeta();
+}
+
+def view_dict(v: PaperView) -> dict[str, any] {
     return {
-        "id": p.openalex_id,
-        "title": p.title.replace("RETRACTED ARTICLE: ", "").replace("RETRACTED: ", ""),
-        "year": p.year,
-        "cited_by_count": p.cited_by_count,
-        "is_retracted": p.is_retracted,
-        "is_overturned": p.is_overturned,
-        "hop": p.hop,
-        "inconsistency": round(p.inconsistency, 4),
-        "exposure": round(p.exposure, 1),
-        "priority": round(priority_of(p), 4),
-        "pruned": p.pruned
+        "id": v.id,
+        "title": v.title,
+        "year": v.year,
+        "cited_by_count": v.cited_by_count,
+        "is_retracted": v.is_retracted,
+        "is_overturned": v.is_overturned,
+        "hop": v.hop,
+        "inconsistency": v.inconsistency,
+        "exposure": v.exposure,
+        "priority": v.priority,
+        "pruned": v.pruned
     };
 }
 
-def build_payload() -> dict {
-    papers = [root -->[?:Paper]];
-    nodes = [];
-    links = [];
-    for p in papers {
-        nodes.append(node_row(p));
-        for cited in [p ->:Cites:->] {
+def build_payload -> GraphPayload {
+    views: list[PaperView] = [];
+    links: list[dict[str, str]] = [];
+    for p in [root-->[?:Paper]] {
+        views.append(p.view());
+        for cited in [p->:Cites:->] {
             links.append({"source": p.openalex_id, "target": cited.openalex_id});
         }
     }
 
-    seeds = [root -->[?:Paper, is_overturned == True]];
-    seed_title = "No seed selected";
-    seed_cites = 0;
-    verified = False;
+    meta = GraphMeta(n_papers=len(views), n_edges=len(links));
+
+    seeds = [
+        p
+        for p in [root-->[?:Paper]]
+        if p.is_overturned
+    ];
     if seeds {
-        s = seeds[0];
-        seed_title = s.title.replace("RETRACTED ARTICLE: ", "").replace("RETRACTED: ", "");
-        seed_cites = s.cited_by_count;
-        verified = s.is_retracted;
+        meta.seed_title = seeds[0].clean_title();
+        meta.seed_cites = seeds[0].cited_by_count;
+        meta.verified = seeds[0].is_retracted;
     }
 
-    # top affected excludes the seed itself
-    affected = [n for n in nodes if not (n as dict)["is_overturned"]];
-    ranked = sorted(affected, key=lambda (n: dict) { n["priority"]; }, reverse=True);
-    top_cites = 0;
-    if ranked { top_cites = (ranked[0] as dict)["cited_by_count"] as int; }
+    affected = [
+        v
+        for v in views
+        if not v.is_overturned
+    ];
+    ranked: list[PaperView] = sorted(
+        affected, key=lambda (v: PaperView) { v.priority; }, reverse=True
+    );
+    if ranked {
+        meta.top_cites = ranked[0].cited_by_count;
+    }
+    meta.retracted_downstream = len(
+        [
+            v
+            for v in views
+            if v.is_retracted and not v.is_overturned
+        ]
+    );
 
-    further = len([
-        n for n in nodes
-        if (n as dict)["is_retracted"] and not (n as dict)["is_overturned"]
-    ]);
+    return GraphPayload(nodes=views, links=links, meta=meta);
+}
 
-    return {
-        "nodes": nodes,
-        "links": links,
-        "meta": {
-            "seed_title": seed_title,
-            "seed_cites": seed_cites,
-            "verified": verified,
-            "n_papers": len(nodes),
-            "n_edges": len(links),
-            "top_cites": top_cites,
-            "retracted_downstream": further
+def payload_json(p: GraphPayload) -> str {
+    return json.dumps(
+        {
+            "nodes": [view_dict(v) for v in p.nodes],
+            "links": p.links,
+            "meta": {
+                "seed_title": p.meta.seed_title,
+                "seed_cites": p.meta.seed_cites,
+                "verified": p.meta.verified,
+                "n_papers": p.meta.n_papers,
+                "n_edges": p.meta.n_edges,
+                "top_cites": p.meta.top_cites,
+                "retracted_downstream": p.meta.retracted_downstream
+            }
         }
-    };
+    );
 }
 
 
 """Write graph.html with the current graph baked in."""
 walker Export {
-    has out: str = "graph.html";
-    has reports: list[dict] = [];
+    has out: str = "graph.html",
+        reports: list[dict[str, any]] = [];
 
     can go with Root entry {
         payload = build_payload();
         tpl = open("viz_template.html").read();
-        html = tpl.replace("__PAYLOAD__", json.dumps(payload));
-        open(self.out, "w").write(html);
-        meta = payload["meta"] as dict;
+        open(self.out, "w").write(tpl.replace("__PAYLOAD__", payload_json(payload)));
         report {
             "wrote": self.out,
-            "nodes": meta["n_papers"],
-            "links": meta["n_edges"],
-            "verified": meta["verified"]
+            "nodes": payload.meta.n_papers,
+            "links": payload.meta.n_edges,
+            "verified": payload.meta.verified
         };
     }
 }
