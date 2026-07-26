@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Patient Zero</title>
+<style>
+  :root{
+    --bg:#08090d;
+    --panel:rgba(255,255,255,.035);
+    --panel-solid:#101218;
+    --line:rgba(255,255,255,.08);
+    --line-soft:rgba(255,255,255,.05);
+    --fg:#e7e9ee;
+    --dim:#868f9f;
+    --dimmer:#5c6473;
+    --seed:#ff4d4d;
+    --hop1:#ff9550;
+    --hop2:#ffd166;
+    --pruned:#343b47;
+    --panelW:312px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--fg); overflow:hidden;
+    font:400 14px/1.55 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Inter,sans-serif;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  canvas{display:block;cursor:grab}
+  #vig{position:fixed;inset:0;pointer-events:none;z-index:1;
+       background:radial-gradient(120% 90% at 44% 46%,rgba(255,150,80,.05),transparent 62%),
+                  radial-gradient(100% 100% at 50% 50%,transparent 56%,rgba(0,0,0,.6) 100%)}
+
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+  /* ---------- header ---------- */
+  #head{position:fixed;top:0;left:0;right:0;z-index:6;padding:20px 24px 30px;pointer-events:none;
+        background:linear-gradient(180deg,rgba(8,9,13,.94) 0%,rgba(8,9,13,.72) 55%,transparent 100%)}
+  .eyebrow{font-size:10.5px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;color:var(--dimmer)}
+  h1{font-size:19px;font-weight:640;letter-spacing:-.012em;margin-top:5px;line-height:1.32;max-width:58ch}
+  #badge{display:inline-flex;align-items:center;vertical-align:3px;margin-left:9px;
+         padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:700;letter-spacing:.08em;
+         text-transform:uppercase;background:rgba(255,77,77,.13);color:#ff8080;
+         border:1px solid rgba(255,77,77,.32)}
+  #badge.hypo{background:rgba(255,209,102,.12);color:#ffd166;border-color:rgba(255,209,102,.32)}
+
+  #stats{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:9px 14px 10px;min-width:76px;backdrop-filter:blur(7px)}
+  .stat .v{font-size:17px;font-weight:640;letter-spacing:-.02em;line-height:1.15}
+  .stat .k{font-size:10px;color:var(--dim);margin-top:3px;letter-spacing:.035em}
+  .stat.alert .v{color:#ff8080}
+
+  /* ---------- view controls ---------- */
+  #ctrl{position:fixed;top:22px;right:calc(var(--panelW) + 22px);z-index:8;display:flex;gap:6px}
+  .btn{background:var(--panel);border:1px solid var(--line);color:var(--dim);
+       border-radius:8px;padding:7px 12px;font:inherit;font-size:11.5px;font-weight:600;
+       letter-spacing:.03em;cursor:pointer;backdrop-filter:blur(8px);
+       transition:color .13s,background .13s,border-color .13s}
+  .btn:hover{color:var(--fg);background:rgba(255,255,255,.07)}
+  .btn.on{color:#ffcaa0;background:rgba(255,149,80,.14);border-color:rgba(255,149,80,.36)}
+
+  /* ---------- right panel ---------- */
+  #side{position:fixed;top:0;right:0;bottom:0;width:var(--panelW);z-index:7;
+        background:linear-gradient(90deg,rgba(8,9,13,0),rgba(12,14,19,.93) 16%,var(--panel-solid) 100%);
+        border-left:1px solid var(--line);display:flex;flex-direction:column}
+  #side h2{font-size:10.5px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;
+           color:var(--dimmer);padding:22px 20px 5px}
+  #side .note{font-size:11.5px;color:var(--dim);padding:0 20px 14px;line-height:1.5}
+  #list{overflow-y:auto;padding:0 12px 18px;flex:1;scrollbar-width:thin;
+        scrollbar-color:rgba(255,255,255,.14) transparent}
+  #list::-webkit-scrollbar{width:8px}
+  #list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.13);border-radius:99px}
+  .row{display:grid;grid-template-columns:22px 1fr;gap:10px;padding:10px 9px;border-radius:9px;
+       cursor:pointer;border:1px solid transparent;transition:background .13s,border-color .13s}
+  .row:hover{background:rgba(255,255,255,.045);border-color:var(--line-soft)}
+  .row.on{background:rgba(255,149,80,.11);border-color:rgba(255,149,80,.33)}
+  .rank{font-size:11px;color:var(--dimmer);text-align:right;padding-top:2px;font-weight:600}
+  .ttl{font-size:12.3px;line-height:1.42;color:#dfe3ea;
+       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .meta{font-size:10.5px;color:var(--dim);margin-top:5px;display:flex;align-items:center;gap:7px}
+  .pip{width:6px;height:6px;border-radius:50%;flex:none}
+  .flag{color:#ff8080;font-weight:650}
+
+  /* ---------- legend ---------- */
+  #legend{position:fixed;bottom:18px;left:24px;z-index:6;pointer-events:none;
+          background:var(--panel);border:1px solid var(--line);border-radius:12px;
+          padding:13px 16px;backdrop-filter:blur(9px);font-size:11.5px;color:var(--dim)}
+  #legend .li{display:flex;align-items:center;gap:9px;margin-top:7px}
+  #legend .li:first-of-type{margin-top:0}
+  #legend .sw{width:9px;height:9px;border-radius:50%;flex:none}
+  #legend .hint{margin-top:11px;padding-top:10px;border-top:1px solid var(--line-soft);
+                font-size:10.5px;color:var(--dimmer);letter-spacing:.02em;max-width:31ch;line-height:1.5}
+
+  /* ---------- tooltip ---------- */
+  #tip{position:fixed;z-index:20;max-width:330px;padding:12px 14px;border-radius:12px;
+       background:rgba(16,18,24,.97);border:1px solid var(--line);
+       box-shadow:0 16px 44px rgba(0,0,0,.66);font-size:12.4px;display:none;pointer-events:none;
+       backdrop-filter:blur(11px)}
+  #tip .t{font-weight:600;line-height:1.42;margin-bottom:8px;color:#f0f2f6}
+  #tip .g{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:11.5px}
+  #tip .g dt{color:var(--dim)}
+  #tip .g dd{color:#dfe3ea}
+  #tip .bar{height:3px;border-radius:99px;background:rgba(255,255,255,.09);margin-top:10px;overflow:hidden}
+  #tip .bar i{display:block;height:100%;border-radius:99px}
+  #tip .warn{margin-top:9px;font-size:10px;font-weight:700;letter-spacing:.07em;
+             text-transform:uppercase;color:#ff8080}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="vig"></div>
+
+<header id="head">
+  <div class="eyebrow">Patient Zero</div>
+  <h1><span id="h1txt"></span><span id="badge"></span></h1>
+  <div id="stats"></div>
+</header>
+
+<div id="ctrl">
+  <button class="btn" id="bMode">3D</button>
+  <button class="btn on" id="bSpin">Spin</button>
+  <button class="btn" id="bFit">Fit</button>
+</div>
+
+<aside id="side">
+  <h2>Most affected</h2>
+  <div class="note">Ranked by inconsistency, weighted by how much rests on each paper. Click a row to focus it.</div>
+  <div id="list"></div>
+</aside>
+
+<div id="legend">
+  <div class="li"><i class="sw" style="background:var(--seed)"></i> Overturned source</div>
+  <div class="li"><i class="sw" style="background:var(--hop1)"></i> Cites it directly</div>
+  <div class="li"><i class="sw" style="background:var(--hop2)"></i> Inherits it transitively</div>
+  <div class="li"><i class="sw" style="background:var(--pruned)"></i> Pruned, not load bearing</div>
+  <div class="hint" id="hint"></div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const PAYLOAD = {"nodes": [{"id": "W2158048826", "title": "Pluripotency of mesenchymal stem cells derived from adult marrow", "year": 2002, "cited_by_count": 5532, "is_retracted": true, "is_overturned": true, "hop": 0, "inconsistency": 1.0, "exposure": 185949.0, "priority": 8.6185, "pruned": false}, {"id": "W2025371271", "title": "Minimal criteria for defining multipotent mesenchymal stromal cells. The International Society for Cellular Therapy position statement", "year": 2006, "cited_by_count": 17794, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 51268.0, "priority": 4.404, "pruned": false}, {"id": "W2107503723", "title": "Human Adipose Tissue Is a Source of Multipotent Stem Cells", "year": 2002, "cited_by_count": 6663, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 42975.0, "priority": 3.962, "pruned": false}, {"id": "W2028036560", "title": "Adult Cardiac Stem Cells Are Multipotent and Support Myocardial Regeneration", "year": 2003, "cited_by_count": 3537, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 27686.0, "priority": 3.6771, "pruned": false}, {"id": "W2150163104", "title": "Functional Expression Cloning of Nanog, a Pluripotency Sustaining Factor in Embryonic Stem Cells", "year": 2003, "cited_by_count": 3261, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 3261.0, "priority": 3.6405, "pruned": false}, {"id": "W2116500923", "title": "Mesenchymal stem cells as trophic mediators", "year": 2006, "cited_by_count": 3002, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 3002.0, "priority": 3.6033, "pruned": false}, {"id": "W2001675896", "title": "Multi-Organ, Multi-Lineage Engraftment by a Single Bone Marrow-Derived Stem Cell", "year": 2001, "cited_by_count": 2685, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 2685.0, "priority": 3.5531, "pruned": false}, {"id": "W2164506013", "title": "Transplantation of Progenitor Cells and Regeneration Enhancement in Acute Myocardial Infarction (TOPCARE-AMI)", "year": 2002, "cited_by_count": 2201, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 2201.0, "priority": 3.4637, "pruned": false}, {"id": "W2125155374", "title": "Repair of Infarcted Myocardium by Autologous Intracoronary Mononuclear Bone Marrow Cell Transplantation in Humans", "year": 2002, "cited_by_count": 2071, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 2071.0, "priority": 3.4363, "pruned": false}, {"id": "W2012549032", "title": "Concise Review: Mesenchymal Stem/Multipotent Stromal Cells: The State of Transdifferentiation and Modes of Tissue Repair\u2014Current Views", "year": 2007, "cited_by_count": 1917, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1917.0, "priority": 3.4016, "pruned": false}, {"id": "W2073157961", "title": "Chromatin modification and epigenetic reprogramming in mammalian development", "year": 2002, "cited_by_count": 1906, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1906.0, "priority": 3.399, "pruned": false}, {"id": "W2126134953", "title": "Immunomodulatory properties of mesenchymal stromal cells", "year": 2007, "cited_by_count": 1791, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1791.0, "priority": 3.371, "pruned": false}, {"id": "W2147061961", "title": "Human mesenchymal stem cells modulate B-cell functions", "year": 2005, "cited_by_count": 1758, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1758.0, "priority": 3.3626, "pruned": false}, {"id": "W2122059700", "title": "Cardiac progenitor cells from adult myocardium: Homing, differentiation, and fusion after infarction", "year": 2003, "cited_by_count": 1753, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1753.0, "priority": 3.3613, "pruned": false}, {"id": "W2016931709", "title": "Mesenchymal stem cells: clinical applications and biological characterization", "year": 2004, "cited_by_count": 1670, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1670.0, "priority": 3.3395, "pruned": false}, {"id": "W2011653132", "title": "Bone marrow mesenchymal stem cells inhibit the response of naive and memory antigen-specific T cells to their cognate peptide", "year": 2003, "cited_by_count": 1594, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1594.0, "priority": 3.3186, "pruned": false}, {"id": "W1979103623", "title": "Therapeutic stem and progenitor cell transplantation for organ vascularization and regeneration", "year": 2003, "cited_by_count": 1582, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1582.0, "priority": 3.3152, "pruned": false}, {"id": "W2207291742", "title": "Applying extracellular vesicles based therapeutics in clinical trials \u2013 an ISEV position paper", "year": 2015, "cited_by_count": 1533, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1533.0, "priority": 3.301, "pruned": false}, {"id": "W2022915249", "title": "Plasticity of mesenchymal stem cells in immunomodulation: pathological and therapeutic implications", "year": 2014, "cited_by_count": 1504, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1504.0, "priority": 3.2924, "pruned": false}, {"id": "W2048258494", "title": "Little Evidence for Developmental Plasticity of Adult Hematopoietic Stem Cells", "year": 2002, "cited_by_count": 1476, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1476.0, "priority": 3.284, "pruned": false}, {"id": "W2150103989", "title": "Mesenchymal stem cell engraftment in lung is enhanced in response to bleomycin exposure and ameliorates its fibrotic effects", "year": 2003, "cited_by_count": 1465, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1465.0, "priority": 3.2806, "pruned": false}, {"id": "W2108241558", "title": "Stem Cells, the Molecular Circuitry of Pluripotency and Nuclear Reprogramming", "year": 2008, "cited_by_count": 1433, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1433.0, "priority": 3.2707, "pruned": false}, {"id": "W2154502936", "title": "Mesenchymal Stem Cells and Their Potential as Cardiac Therapeutics", "year": 2004, "cited_by_count": 1425, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1425.0, "priority": 3.2682, "pruned": false}, {"id": "W2106117542", "title": "Mesenchymal stem cells ameliorate experimental autoimmune encephalomyelitis inducing T-cell anergy", "year": 2005, "cited_by_count": 1424, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1424.0, "priority": 3.2679, "pruned": false}, {"id": "W2114222046", "title": "Marrow-Derived Stromal Cells Express Genes Encoding a Broad Spectrum of Arteriogenic Cytokines and Promote In Vitro and In Vivo Arteriogenesis Through Paracrine Mechanisms", "year": 2004, "cited_by_count": 1400, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1400.0, "priority": 3.2602, "pruned": false}, {"id": "W2104192199", "title": "Emerging trends in regenerative medicine: a scientometric analysis in<i>CiteSpace</i>", "year": 2012, "cited_by_count": 1344, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1344.0, "priority": 3.2419, "pruned": false}, {"id": "W2019495971", "title": "Role for Interferon-\u03b3 in the Immunomodulatory Activity of Human Bone Marrow Mesenchymal Stem Cells", "year": 2005, "cited_by_count": 1318, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1318.0, "priority": 3.2331, "pruned": false}, {"id": "W2269475172", "title": "Fate decision of mesenchymal stem cells: adipocytes or osteoblasts?", "year": 2016, "cited_by_count": 1308, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1308.0, "priority": 3.2297, "pruned": false}, {"id": "W2035582618", "title": "Mesenchymal Stem Cells Can Be Differentiated Into Endothelial Cells In Vitro", "year": 2004, "cited_by_count": 1306, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1306.0, "priority": 3.229, "pruned": false}, {"id": "W2054095354", "title": "Local Delivery of Marrow-Derived Stromal Cells Augments Collateral Perfusion Through Paracrine Mechanisms", "year": 2004, "cited_by_count": 1305, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1305.0, "priority": 3.2286, "pruned": false}, {"id": "W2072569544", "title": "A Tumorigenic Subpopulation with Stem Cell Properties in Melanomas", "year": 2005, "cited_by_count": 1278, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1278.0, "priority": 3.2192, "pruned": false}, {"id": "W2113619226", "title": "Comparative characteristics of mesenchymal stem cells from human bone marrow, adipose tissue, and umbilical cord blood", "year": 2005, "cited_by_count": 1258, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1258.0, "priority": 3.2121, "pruned": false}, {"id": "W2042686954", "title": "Plasticity of Adult Stem Cells", "year": 2004, "cited_by_count": 1243, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1243.0, "priority": 3.2067, "pruned": false}, {"id": "W1998650056", "title": "The meaning, the sense and the significance: translating the science of mesenchymal stem cells into medicine", "year": 2013, "cited_by_count": 1210, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1210.0, "priority": 3.1946, "pruned": false}, {"id": "W2107065228", "title": "Systemic Delivery of Bone Marrow\u2013Derived Mesenchymal Stem Cells to the Infarcted Myocardium", "year": 2003, "cited_by_count": 1204, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1204.0, "priority": 3.1924, "pruned": false}, {"id": "W2154580143", "title": "Monolayered mesenchymal stem cells repair scarred myocardium after myocardial infarction", "year": 2006, "cited_by_count": 1190, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1190.0, "priority": 3.1871, "pruned": false}, {"id": "W1983271466", "title": "Nanosize and Vitality:\u2009 TiO<sub>2</sub> Nanotube Diameter Directs Cell Fate", "year": 2007, "cited_by_count": 1181, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1181.0, "priority": 3.1837, "pruned": false}, {"id": "W2090241102", "title": "Gastric Cancer Originating from Bone Marrow-Derived Cells", "year": 2004, "cited_by_count": 1161, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1161.0, "priority": 3.1761, "pruned": false}, {"id": "W2049446122", "title": "Replicative Senescence of Mesenchymal Stem Cells: A Continuous and Organized Process", "year": 2008, "cited_by_count": 1125, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1125.0, "priority": 3.1619, "pruned": false}, {"id": "W1974207011", "title": "Adult mesenchymal stem cells: characterization, differentiation, and application in cell and gene therapy", "year": 2004, "cited_by_count": 1109, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1109.0, "priority": 3.1555, "pruned": false}, {"id": "W2968810602", "title": "Mesenchymal Stem Cells for Regenerative Medicine", "year": 2019, "cited_by_count": 1097, "is_retracted": false, "is_overturned": false, "hop": 1, "inconsistency": 0.45, "exposure": 1097.0, "priority": 3.1506, "pruned": false}, {"id": "W2048644480", "title": "3D bioprinting of tissues and organs", "year": 2014, "cited_by_count": 6886, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 6886.0, "priority": 1.7896, "pruned": false}, {"id": "W2512899508", "title": "The biology and function of fibroblasts in cancer", "year": 2016, "cited_by_count": 4327, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 4327.0, "priority": 1.6955, "pruned": false}, {"id": "W2991416247", "title": "Mesenchymal stem cell perspective: cell biology to clinical progress", "year": 2019, "cited_by_count": 2034, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2034.0, "priority": 1.5427, "pruned": false}, {"id": "W2021916724", "title": "Intravenous hMSCs Improve Myocardial Infarction in Mice because Cells Embolized in Lung Are Activated to Secrete the Anti-inflammatory Protein TSG-6", "year": 2009, "cited_by_count": 1938, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1938.0, "priority": 1.5329, "pruned": false}, {"id": "W2083156208", "title": "Stromal cells from the adipose tissue-derived stromal vascular fraction and culture expanded adipose tissue-derived stromal/stem cells: a joint\u00a0statement of the International Federation for Adipose Therapeutics and Science (IFATS) and the International Society for Cellular Therapy\u00a0(ISCT)", "year": 2013, "cited_by_count": 1883, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1883.0, "priority": 1.5271, "pruned": false}, {"id": "W2145040826", "title": "Mesenchymal Stem Cells Derived from Dental Tissues <i>vs</i> . Those from Other Sources: Their Biology and Role in Regenerative Medicine", "year": 2009, "cited_by_count": 1868, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1868.0, "priority": 1.5255, "pruned": false}, {"id": "W2153949260", "title": "Different populations and sources of human mesenchymal stem cells (MSC): A comparison of adult and neonatal tissue-derived MSC", "year": 2011, "cited_by_count": 1773, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1773.0, "priority": 1.5149, "pruned": false}, {"id": "W2093191361", "title": "Mesenchymal Stem Cells: Revisiting History, Concepts, and Assays", "year": 2008, "cited_by_count": 1617, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1617.0, "priority": 1.4963, "pruned": false}, {"id": "W2005943573", "title": "Paracrine Factors of Mesenchymal Stem Cells Recruit Macrophages and Endothelial Lineage Cells and Enhance Wound Healing", "year": 2008, "cited_by_count": 1610, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1610.0, "priority": 1.4954, "pruned": false}, {"id": "W2046237540", "title": "Mitochondrial transfer from bone-marrow\u2013derived stromal cells to pulmonary alveoli protects against acute lung injury", "year": 2012, "cited_by_count": 1597, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1597.0, "priority": 1.4937, "pruned": false}, {"id": "W2038399651", "title": "Mesenchymal stem cells: immune evasive, not immune privileged", "year": 2014, "cited_by_count": 1556, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1556.0, "priority": 1.4885, "pruned": false}, {"id": "W2084037323", "title": "Oxygen in Stem Cell Biology: A Critical Component of the Stem Cell Niche", "year": 2010, "cited_by_count": 1554, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1554.0, "priority": 1.4882, "pruned": false}, {"id": "W2159417266", "title": "Mesenchymal Stem Cell Homing: The Devil Is in the Details", "year": 2009, "cited_by_count": 1460, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1460.0, "priority": 1.4756, "pruned": false}, {"id": "W2071904806", "title": "Mechanisms involved in the therapeutic properties of mesenchymal stem cells", "year": 2009, "cited_by_count": 1454, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1454.0, "priority": 1.4748, "pruned": false}, {"id": "W2076491580", "title": "A Perivascular Origin for Mesenchymal Stem Cells in Multiple Human Organs", "year": 2008, "cited_by_count": 3982, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 3982.0, "priority": 1.6787, "pruned": false}, {"id": "W2036348189", "title": "Comparative Analysis of Mesenchymal Stem Cells from Bone Marrow, Umbilical Cord Blood, or Adipose Tissue", "year": 2006, "cited_by_count": 3397, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 3397.0, "priority": 1.6465, "pruned": false}, {"id": "W1965425745", "title": "Concise Review: Mesenchymal Stem Cells: Their Phenotype, Differentiation Capacity, Immunological Features, and Potential for Homing", "year": 2007, "cited_by_count": 2371, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2371.0, "priority": 1.5737, "pruned": false}, {"id": "W2115062578", "title": "Adipose-Derived Stem Cells for Regenerative Medicine", "year": 2007, "cited_by_count": 2332, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2332.0, "priority": 1.5704, "pruned": false}, {"id": "W2007310752", "title": "Bone Tissue Engineering: Recent Advances and Challenges", "year": 2012, "cited_by_count": 2308, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2308.0, "priority": 1.5683, "pruned": false}, {"id": "W2021634519", "title": "Secretion of Angiogenic and Antiapoptotic Factors by Human Adipose Stromal Cells", "year": 2004, "cited_by_count": 2258, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2258.0, "priority": 1.5638, "pruned": false}, {"id": "W2133514604", "title": "Normal Bone Anatomy and Physiology", "year": 2008, "cited_by_count": 2112, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2112.0, "priority": 1.5503, "pruned": false}, {"id": "W1995122819", "title": "Comparison of human stem cells derived from various mesenchymal tissues: Superiority of synovium as a cell source", "year": 2005, "cited_by_count": 1553, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1553.0, "priority": 1.4881, "pruned": false}, {"id": "W2124857894", "title": "Plasticity of Human Adipose Lineage Cells Toward Endothelial Cells", "year": 2004, "cited_by_count": 1362, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1362.0, "priority": 1.4615, "pruned": false}, {"id": "W1994586809", "title": "Isolation of multipotent mesenchymal stem cells from umbilical cord blood", "year": 2003, "cited_by_count": 1362, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1362.0, "priority": 1.4615, "pruned": false}, {"id": "W2167202160", "title": "Direct Reprogramming of Fibroblasts into Functional Cardiomyocytes by Defined Factors", "year": 2010, "cited_by_count": 2465, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2465.0, "priority": 1.5816, "pruned": false}, {"id": "W2098743872", "title": "Endothelial Progenitor Cells", "year": 2004, "cited_by_count": 2362, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2362.0, "priority": 1.573, "pruned": false}, {"id": "W2124396531", "title": "Paracrine Mechanisms in Adult Stem Cell Signaling and Therapy", "year": 2008, "cited_by_count": 2019, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 2019.0, "priority": 1.5412, "pruned": false}, {"id": "W2148220540", "title": "Isolation and Expansion of Adult Cardiac Stem Cells From Human and Murine Heart", "year": 2004, "cited_by_count": 1447, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1447.0, "priority": 1.4738, "pruned": false}, {"id": "W2093494581", "title": "Mammalian heart renewal by pre-existing cardiomyocytes", "year": 2012, "cited_by_count": 1350, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1350.0, "priority": 1.4597, "pruned": false}, {"id": "W2065171831", "title": "Postnatal isl1+ cardioblasts enter fully differentiated cardiomyocyte lineages", "year": 2005, "cited_by_count": 1301, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1301.0, "priority": 1.4523, "pruned": false}, {"id": "W2125635123", "title": "Autologous bone marrow-derived stem-cell transfer in patients with ST-segment elevation myocardial infarction: double-blind, randomised controlled trial", "year": 2006, "cited_by_count": 1290, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1290.0, "priority": 1.4505, "pruned": false}, {"id": "W2132735690", "title": "Cardiac stem cells in patients with ischaemic cardiomyopathy (SCIPIO): initial results of a randomised phase 1 trial", "year": 2011, "cited_by_count": 1281, "is_retracted": true, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1281.0, "priority": 1.4491, "pruned": false}, {"id": "W2067335193", "title": "Stem-cell therapy for cardiac disease", "year": 2008, "cited_by_count": 1180, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1180.0, "priority": 1.4325, "pruned": false}, {"id": "W2158682140", "title": "Evidence supporting paracrine hypothesis for Akt\u2010modified mesenchymal stem cell\u2010mediated cardiac protection and functional improvement", "year": 2006, "cited_by_count": 1148, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1148.0, "priority": 1.4269, "pruned": false}, {"id": "W1669479280", "title": "Dynamics of Cell Generation and Turnover in the Human Heart", "year": 2015, "cited_by_count": 1147, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1147.0, "priority": 1.4268, "pruned": false}, {"id": "W2118204731", "title": "Sirt1 Regulates Aging and Resistance to Oxidative Stress in the Heart", "year": 2007, "cited_by_count": 1141, "is_retracted": false, "is_overturned": false, "hop": 2, "inconsistency": 0.2025, "exposure": 1141.0, "priority": 1.4257, "pruned": false}], "links": [{"source": "W2025371271", "target": "W2158048826"}, {"source": "W2107503723", "target": "W2158048826"}, {"source": "W2028036560", "target": "W2158048826"}, {"source": "W2150163104", "target": "W2158048826"}, {"source": "W2116500923", "target": "W2158048826"}, {"source": "W2116500923", "target": "W2028036560"}, {"source": "W2001675896", "target": "W2158048826"}, {"source": "W2164506013", "target": "W2158048826"}, {"source": "W2125155374", "target": "W2158048826"}, {"source": "W2012549032", "target": "W2158048826"}, {"source": "W2012549032", "target": "W2025371271"}, {"source": "W2073157961", "target": "W2158048826"}, {"source": "W2126134953", "target": "W2158048826"}, {"source": "W2147061961", "target": "W2158048826"}, {"source": "W2122059700", "target": "W2158048826"}, {"source": "W2016931709", "target": "W2158048826"}, {"source": "W2011653132", "target": "W2158048826"}, {"source": "W1979103623", "target": "W2158048826"}, {"source": "W2207291742", "target": "W2158048826"}, {"source": "W2022915249", "target": "W2158048826"}, {"source": "W2048258494", "target": "W2158048826"}, {"source": "W2150103989", "target": "W2158048826"}, {"source": "W2108241558", "target": "W2158048826"}, {"source": "W2154502936", "target": "W2158048826"}, {"source": "W2154502936", "target": "W2107503723"}, {"source": "W2106117542", "target": "W2158048826"}, {"source": "W2114222046", "target": "W2158048826"}, {"source": "W2104192199", "target": "W2158048826"}, {"source": "W2019495971", "target": "W2158048826"}, {"source": "W2269475172", "target": "W2158048826"}, {"source": "W2269475172", "target": "W2107503723"}, {"source": "W2035582618", "target": "W2158048826"}, {"source": "W2054095354", "target": "W2158048826"}, {"source": "W2072569544", "target": "W2158048826"}, {"source": "W2113619226", "target": "W2158048826"}, {"source": "W2042686954", "target": "W2158048826"}, {"source": "W2042686954", "target": "W2028036560"}, {"source": "W1998650056", "target": "W2158048826"}, {"source": "W2107065228", "target": "W2158048826"}, {"source": "W2154580143", "target": "W2158048826"}, {"source": "W1983271466", "target": "W2158048826"}, {"source": "W2090241102", "target": "W2158048826"}, {"source": "W2049446122", "target": "W2158048826"}, {"source": "W1974207011", "target": "W2158048826"}, {"source": "W2968810602", "target": "W2158048826"}, {"source": "W2048644480", "target": "W2025371271"}, {"source": "W2048644480", "target": "W2107503723"}, {"source": "W2512899508", "target": "W2025371271"}, {"source": "W2991416247", "target": "W2025371271"}, {"source": "W2021916724", "target": "W2025371271"}, {"source": "W2083156208", "target": "W2025371271"}, {"source": "W2083156208", "target": "W2107503723"}, {"source": "W2145040826", "target": "W2025371271"}, {"source": "W2153949260", "target": "W2025371271"}, {"source": "W2153949260", "target": "W2107503723"}, {"source": "W2153949260", "target": "W2028036560"}, {"source": "W2093191361", "target": "W2025371271"}, {"source": "W2005943573", "target": "W2025371271"}, {"source": "W2046237540", "target": "W2025371271"}, {"source": "W2038399651", "target": "W2025371271"}, {"source": "W2084037323", "target": "W2025371271"}, {"source": "W2159417266", "target": "W2025371271"}, {"source": "W2071904806", "target": "W2025371271"}, {"source": "W2076491580", "target": "W2107503723"}, {"source": "W2036348189", "target": "W2107503723"}, {"source": "W1965425745", "target": "W2107503723"}, {"source": "W2115062578", "target": "W2107503723"}, {"source": "W2007310752", "target": "W2107503723"}, {"source": "W2021634519", "target": "W2107503723"}, {"source": "W2133514604", "target": "W2107503723"}, {"source": "W1995122819", "target": "W2107503723"}, {"source": "W2124857894", "target": "W2107503723"}, {"source": "W1994586809", "target": "W2107503723"}, {"source": "W2167202160", "target": "W2028036560"}, {"source": "W2098743872", "target": "W2028036560"}, {"source": "W2124396531", "target": "W2028036560"}, {"source": "W2148220540", "target": "W2028036560"}, {"source": "W2093494581", "target": "W2028036560"}, {"source": "W2065171831", "target": "W2028036560"}, {"source": "W2125635123", "target": "W2028036560"}, {"source": "W2132735690", "target": "W2028036560"}, {"source": "W2067335193", "target": "W2028036560"}, {"source": "W2158682140", "target": "W2028036560"}, {"source": "W1669479280", "target": "W2028036560"}, {"source": "W2118204731", "target": "W2028036560"}], "meta": {"seed_title": "Pluripotency of mesenchymal stem cells derived from adult marrow", "seed_cites": 5532, "verified": true, "n_papers": 77, "n_edges": 85, "top_cites": 17794, "retracted_downstream": 1}};
+const nodes = PAYLOAD.nodes, links = PAYLOAD.links, META = PAYLOAD.meta;
+
+const cv=document.getElementById('c'), cx=cv.getContext('2d'), tip=document.getElementById('tip');
+const listEl=document.getElementById('list');
+let W,H,DPR=1;
+
+/* The CSS box must be pinned explicitly. A canvas with no CSS size renders at its
+   ATTRIBUTE size in CSS px, so at devicePixelRatio 2 the element ends up twice the
+   viewport and every clientX/clientY hit test is offset by DPR. */
+function size(){
+  DPR = window.devicePixelRatio || 1;
+  W = innerWidth; H = innerHeight;
+  cv.style.width = W+'px'; cv.style.height = H+'px';
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  cx.setTransform(DPR,0,0,DPR,0,0);
+}
+size();
+
+const fmt = n => n.toLocaleString('en-US');
+const esc = s => s.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+const byId = new Map(nodes.map(n=>[n.id,n]));
+const maxCites = Math.max(...nodes.map(n=>n.cited_by_count),1);
+const PANEL = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--panelW'));
+
+for (const n of nodes){
+  const t = Math.log(1+n.cited_by_count)/Math.log(1+maxCites);
+  n.r = n.hop===0 ? 20 : 4.5 + Math.pow(t,2.1)*34;
+}
+
+const SHELL=[0,330,700,980];
+const byHop={};
+for (const n of nodes) (byHop[n.hop] ||= []).push(n);
+const L = links.map(l=>({s:byId.get(l.source),t:byId.get(l.target)})).filter(l=>l.s&&l.t);
+
+/* ============ 2D layout: concentric rings ============ */
+for (const h in byHop){
+  const ring=byHop[h], R=SHELL[Math.min(h,3)] ?? 1180;
+  ring.sort((a,b)=>b.cited_by_count-a.cited_by_count);
+  ring.forEach((n,i)=>{
+    const a=(i/ring.length)*Math.PI*2 + (h%2?0.35:0);
+    n.px=Math.cos(a)*R; n.py=Math.sin(a)*R; n.vx=n.vy=0; n.ring=R;
+  });
+}
+for (let step=0; step<380; step++){
+  for (let i=0;i<nodes.length;i++){
+    const a=nodes[i];
+    for (let j=i+1;j<nodes.length;j++){
+      const b=nodes[j];
+      let dx=b.px-a.px, dy=b.py-a.py, d2=dx*dx+dy*dy;
+      if (d2<1){ d2=1; dx=Math.random()-.5; dy=Math.random()-.5; }
+      const min=a.r+b.r+16;
+      if (d2 < min*min*9){
+        const d=Math.sqrt(d2), f=(min*2.4-d)/d*0.09;
+        if (f>0){ a.vx-=dx*f; a.vy-=dy*f; b.vx+=dx*f; b.vy+=dy*f; }
+      }
+    }
+  }
+  for (const {s,t} of L){
+    const dx=t.px-s.px, dy=t.py-s.py, d=Math.hypot(dx,dy)||1, f=(d-240)*0.0016;
+    s.vx+=dx/d*f; s.vy+=dy/d*f; t.vx-=dx/d*f; t.vy-=dy/d*f;
+  }
+  for (const n of nodes){
+    if (n.hop===0){ n.vx+=(0-n.px)*.20; n.vy+=(0-n.py)*.20; continue; }
+    const d=Math.hypot(n.px,n.py)||1, pull=(n.ring-d)*.16;
+    n.vx+=n.px/d*pull; n.vy+=n.py/d*pull;
+  }
+  for (const n of nodes){ n.px += n.vx*=.80; n.py += n.vy*=.80; }
+}
+
+/* ============ 3D layout: concentric shells ============
+   Each hop becomes a spherical shell, so distance from the retraction reads as
+   radial depth. Fibonacci sphere gives an even spread with no clustering at the
+   poles, then the same relaxation runs in three dimensions. */
+for (const h in byHop){
+  const shell=byHop[h], R=SHELL[Math.min(h,3)] ?? 1180, N=shell.length;
+  const GOLD=Math.PI*(3-Math.sqrt(5));
+  shell.forEach((n,i)=>{
+    if (h==='0' || N===1){ n.x=n.y=n.z=0; n.vx3=n.vy3=n.vz3=0; n.shell=0; return; }
+    const y=1-(i/(N-1))*2, rad=Math.sqrt(Math.max(0,1-y*y)), th=GOLD*i;
+    n.x=Math.cos(th)*rad*R; n.y=y*R; n.z=Math.sin(th)*rad*R;
+    n.vx3=n.vy3=n.vz3=0; n.shell=R;
+  });
+}
+for (let step=0; step<300; step++){
+  for (let i=0;i<nodes.length;i++){
+    const a=nodes[i];
+    for (let j=i+1;j<nodes.length;j++){
+      const b=nodes[j];
+      let dx=b.x-a.x, dy=b.y-a.y, dz=b.z-a.z, d2=dx*dx+dy*dy+dz*dz;
+      if (d2<1){ d2=1; dx=Math.random()-.5; dy=Math.random()-.5; dz=Math.random()-.5; }
+      const min=(a.r+b.r+22)*1.9;
+      if (d2 < min*min){
+        const d=Math.sqrt(d2), f=(min-d)/d*0.10;
+        a.vx3-=dx*f; a.vy3-=dy*f; a.vz3-=dz*f;
+        b.vx3+=dx*f; b.vy3+=dy*f; b.vz3+=dz*f;
+      }
+    }
+  }
+  for (const {s,t} of L){
+    const dx=t.x-s.x, dy=t.y-s.y, dz=t.z-s.z, d=Math.sqrt(dx*dx+dy*dy+dz*dz)||1;
+    const f=(d-300)*0.0012;
+    s.vx3+=dx/d*f; s.vy3+=dy/d*f; s.vz3+=dz/d*f;
+    t.vx3-=dx/d*f; t.vy3-=dy/d*f; t.vz3-=dz/d*f;
+  }
+  for (const n of nodes){
+    if (n.shell===0){ n.vx3+=(0-n.x)*.22; n.vy3+=(0-n.y)*.22; n.vz3+=(0-n.z)*.22; continue; }
+    const d=Math.sqrt(n.x*n.x+n.y*n.y+n.z*n.z)||1, pull=(n.shell-d)*.18;
+    n.vx3+=n.x/d*pull; n.vy3+=n.y/d*pull; n.vz3+=n.z/d*pull;
+  }
+  for (const n of nodes){ n.x+=n.vx3*=.78; n.y+=n.vy3*=.78; n.z+=n.vz3*=.78; }
+}
+
+/* ============ camera and projection ============ */
+let mode3d=true, spin=true, zoom=1, ox=0, oy=0;
+let yaw=0.6, pitch=-0.28, drag=null;
+const FL=1150, CAMZ=2350;
+const RMAX = Math.max(...nodes.map(n=>Math.hypot(n.x,n.y,n.z)+n.r), 1);
+
+/* returns [screenX, screenY, depth, scaleFactor] */
+function project(n){
+  if (!mode3d){
+    return [n.px*zoom+ox, n.py*zoom+oy, 0, zoom];
+  }
+  const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+  const x1 =  n.x*cy - n.z*sy;
+  const z1 =  n.x*sy + n.z*cy;
+  const y2 =  n.y*cp - z1*sp;
+  const z2 =  n.y*sp + z1*cp;
+  const depth = z2 + CAMZ;
+  const k = (FL / Math.max(120, depth)) * zoom;
+  return [x1*k + ox, y2*k + oy, depth, k];
+}
+
+function viewport(){
+  const padL=56, padR=PANEL+40, padT=182, padB=152;
+  return {padL, padR, padT, padB,
+          w:Math.max(220,W-padL-padR), h:Math.max(220,H-padT-padB)};
+}
+function fit(){
+  const v=viewport();
+  ox = v.padL + v.w/2; oy = v.padT + v.h/2;
+  if (mode3d){
+    /* Fit the bounding sphere. Measuring at mid depth rather than the nearest
+       point fills the frame far better and still cannot clip under rotation,
+       because perspective shrinks whatever swings to the back. */
+    const k = FL/(CAMZ - RMAX*0.45);
+    zoom = Math.min(v.w/(2*RMAX*k), v.h/(2*RMAX*k), 1.6) * 1.16;
+  } else {
+    let a=1e9,b=-1e9,c2=1e9,d2=-1e9;
+    for (const n of nodes){
+      a=Math.min(a,n.px-n.r); b=Math.max(b,n.px+n.r);
+      c2=Math.min(c2,n.py-n.r); d2=Math.max(d2,n.py+n.r);
+    }
+    const gw=b-a||1, gh=d2-c2||1;
+    zoom=Math.min(v.w/gw, v.h/gh, 1.15);
+    ox = v.padL - a*zoom + (v.w-gw*zoom)/2;
+    oy = v.padT - c2*zoom + (v.h-gh*zoom)/2;
+  }
+}
+addEventListener('resize', ()=>{ size(); fit(); draw(); });
+
+const COL={seed:'#ff4d4d',h1:'#ff9550',h2:'#ffd166',h3:'#9aa5b4',pruned:'#343b47'};
+const colorOf = n => n.pruned ? COL.pruned
+  : n.hop===0 ? COL.seed : n.hop===1 ? COL.h1 : n.hop===2 ? COL.h2 : COL.h3;
+
+let focus=null, hover=null;
+function neighbours(n){
+  const s=new Set();
+  for (const l of L){ if (l.s===n) s.add(l.t); if (l.t===n) s.add(l.s); }
+  return s;
+}
+/* depth 0 at the front of the scene, 1 at the back */
+const depthT = d => mode3d ? Math.min(1,Math.max(0,(d-(CAMZ-RMAX))/(2*RMAX||1))) : 0;
+
+/* One camera facing circle per hop shell. Without these the shells overlap in
+   projection and the concentric structure that carries the meaning disappears. */
+const SHELL_RADII=[...new Set(nodes.map(n=>n.shell))].filter(r=>r>1).sort((a,b)=>a-b);
+function drawShells(){
+  const k=(FL/CAMZ)*zoom;
+  for (const R of SHELL_RADII){
+    cx.beginPath(); cx.arc(ox,oy,R*k,0,7);
+    cx.strokeStyle='rgba(255,255,255,.055)'; cx.lineWidth=1; cx.setLineDash([3,7]); cx.stroke();
+    cx.setLineDash([]);
+  }
+}
+
+function draw(){
+  cx.clearRect(0,0,W,H);
+  const active=focus||hover, near=active?neighbours(active):null;
+  if (mode3d && !active) drawShells();
+
+  const P=new Map();
+  for (const n of nodes) P.set(n, project(n));
+
+  /* edges back to front so nearer links sit on top */
+  const edges=L.map(l=>({l, d:(P.get(l.s)[2]+P.get(l.t)[2])/2})).sort((a,b)=>b.d-a.d);
+  for (const {l} of edges){
+    const A=P.get(l.s), B=P.get(l.t);
+    const t=depthT((A[2]+B[2])/2), fade=1-t*0.72;
+    let col=`rgba(255,149,80,${(.20*fade).toFixed(3)})`, lw=.9*(1-t*.35);
+    if (l.s.pruned||l.t.pruned){ col=`rgba(52,59,71,${(.22*fade).toFixed(3)})`; lw=.5; }
+    if (active){
+      const on = l.s===active||l.t===active;
+      col = on ? `rgba(255,183,115,${(.85*fade).toFixed(3)})` : 'rgba(255,149,80,.045)';
+      lw  = on ? 1.6*(1-t*.3) : .45;
+    }
+    cx.strokeStyle=col; cx.lineWidth=Math.max(.35,lw);
+    cx.beginPath(); cx.moveTo(A[0],A[1]); cx.lineTo(B[0],B[1]); cx.stroke();
+  }
+
+  /* nodes back to front, seed drawn late so its glow reads */
+  const order=[...nodes].sort((a,b)=>{
+    const d=P.get(b)[2]-P.get(a)[2];
+    if (a.hop===0) return 1; if (b.hop===0) return -1;
+    return d;
+  });
+  for (const n of order){
+    const [x,y,d,k]=P.get(n);
+    const r=Math.max(n.hop===0?7:1.8, n.r*k);
+    const t=depthT(d);
+    const lit = !active || n===active || near.has(n);
+    cx.globalAlpha = (lit ? (n.pruned?.55:1) : .14) * (1 - t*0.55);
+
+    if (n.hop===0){
+      const g=cx.createRadialGradient(x,y,r*.5,x,y,r+26*k);
+      g.addColorStop(0,'rgba(255,77,77,.4)'); g.addColorStop(1,'rgba(255,77,77,0)');
+      cx.fillStyle=g; cx.beginPath(); cx.arc(x,y,r+26*k,0,7); cx.fill();
+    }
+    if (n===active){
+      cx.beginPath(); cx.arc(x,y,r+7,0,7);
+      cx.strokeStyle='rgba(255,255,255,.55)'; cx.lineWidth=1.4; cx.stroke();
+    }
+    cx.beginPath(); cx.arc(x,y,r,0,7); cx.fillStyle=colorOf(n); cx.fill();
+    if (n.is_retracted){
+      cx.beginPath(); cx.arc(x,y,r+2.3,0,7);
+      cx.strokeStyle='rgba(255,255,255,.8)'; cx.lineWidth=1.4; cx.stroke();
+    }
+    cx.globalAlpha=1;
+  }
+
+  cx.font='600 11px ui-sans-serif,-apple-system,sans-serif';
+  cx.textAlign='center';
+  const big=[...nodes].sort((a,b)=>b.cited_by_count-a.cited_by_count).slice(0,5);
+  for (const n of big){
+    if (active && n!==active && !near.has(n)) continue;
+    const [x,y,d,k]=P.get(n);
+    cx.globalAlpha=1-depthT(d)*0.6;
+    cx.fillStyle='rgba(231,233,238,.92)';
+    cx.fillText(fmt(n.cited_by_count), x, y-Math.max(1.8,n.r*k)-8);
+    cx.globalAlpha=1;
+  }
+}
+
+/* ---------- header ---------- */
+document.getElementById('h1txt').textContent = META.seed_title;
+const badge=document.getElementById('badge');
+badge.textContent = META.verified ? 'Verified retraction' : 'Hypothetical';
+if (!META.verified) badge.classList.add('hypo');
+
+const STATS=[
+  {v:fmt(META.n_papers), k:'papers traced'},
+  {v:fmt(META.n_edges), k:'citation links'},
+  {v:fmt(META.seed_cites), k:'cite the source'},
+  {v:fmt(META.top_cites), k:'rest on top result'},
+  {v:fmt(META.retracted_downstream), k:'further retractions', alert:META.retracted_downstream>0}
+];
+document.getElementById('stats').innerHTML = STATS.map(s=>
+  `<div class="stat${s.alert?' alert':''}"><div class="v num">${s.v}</div><div class="k">${s.k}</div></div>`
+).join('');
+
+/* ---------- ranked panel ---------- */
+const ranked = nodes.filter(n=>!n.is_overturned && !n.pruned)
+                    .sort((a,b)=>b.priority-a.priority).slice(0,14);
+listEl.innerHTML = ranked.map((n,i)=>`
+  <div class="row" data-id="${n.id}">
+    <div class="rank num">${i+1}</div>
+    <div>
+      <div class="ttl">${esc(n.title)}</div>
+      <div class="meta">
+        <i class="pip" style="background:${colorOf(n)}"></i>
+        <span class="num">${fmt(n.cited_by_count)} citations</span>
+        <span>hop ${n.hop}</span>
+        ${n.is_retracted?'<span class="flag">retracted</span>':''}
+      </div>
+    </div>
+  </div>`).join('');
+function syncRows(){
+  listEl.querySelectorAll('.row').forEach(r=>
+    r.classList.toggle('on', !!focus && r.dataset.id===focus.id));
+}
+listEl.querySelectorAll('.row').forEach(row=>{
+  row.addEventListener('click',()=>{
+    const n=byId.get(row.dataset.id);
+    focus = focus===n ? null : n;
+    syncRows(); draw();
+  });
+});
+
+/* ---------- controls ---------- */
+const bMode=document.getElementById('bMode'), bSpin=document.getElementById('bSpin'),
+      bFit=document.getElementById('bFit'), hint=document.getElementById('hint');
+function syncHint(){
+  hint.textContent = mode3d
+    ? 'Size shows citation count. Drag to orbit, scroll to zoom, F to refit.'
+    : 'Size shows citation count. Drag to pan, scroll to zoom, F to refit.';
+  bMode.textContent = mode3d ? '3D' : '2D';
+  bMode.classList.toggle('on', mode3d);
+  bSpin.classList.toggle('on', spin && mode3d);
+  bSpin.disabled = !mode3d;
+  bSpin.style.opacity = mode3d ? 1 : .4;
+}
+bMode.addEventListener('click',()=>{ mode3d=!mode3d; fit(); syncHint(); draw(); });
+bSpin.addEventListener('click',()=>{ spin=!spin; syncHint(); });
+bFit.addEventListener('click',()=>{ fit(); draw(); });
+syncHint();
+fit(); draw();
+
+/* ---------- animation: idle orbit, paused while interacting ---------- */
+let last=0;
+function frame(ts){
+  requestAnimationFrame(frame);
+  if (!mode3d || !spin || drag || hover || focus) { last=ts; return; }
+  if (ts-last < 16) return;
+  last=ts;
+  yaw += 0.0022;
+  draw();
+}
+requestAnimationFrame(frame);
+
+/* ---------- interaction ---------- */
+function ptOf(e){ const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+function hit(mx,my){
+  let best=null,bd=1e9,bestDepth=1e9;
+  for (const n of nodes){
+    const [x,y,d,k]=project(n);
+    const r=Math.max(7,n.r*k)+4, dist=Math.hypot(mx-x,my-y);
+    /* prefer the nearer node when two overlap in screen space */
+    if (dist<r && (d<bestDepth-1 || (Math.abs(d-bestDepth)<=1 && dist<bd))){
+      bd=dist; bestDepth=d; best=n;
+    }
+  }
+  return best;
+}
+function showTip(n,e){
+  const pct=Math.round(n.inconsistency*100);
+  tip.innerHTML=`<div class="t">${esc(n.title)}</div>
+    <dl class="g">
+      <dt>Published</dt><dd class="num">${n.year||'unknown'}</dd>
+      <dt>Citations</dt><dd class="num">${fmt(n.cited_by_count)}</dd>
+      <dt>Distance</dt><dd>hop ${n.hop}${n.hop===0?' (the source)':''}</dd>
+      <dt>Inconsistency</dt><dd class="num">${n.inconsistency.toFixed(3)}</dd>
+    </dl>
+    <div class="bar"><i style="width:${pct}%;background:${colorOf(n)}"></i></div>
+    ${n.is_retracted && !n.is_overturned ? '<div class="warn">Also retracted</div>':''}`;
+  tip.style.display='block';
+  const r=tip.getBoundingClientRect();
+  tip.style.left=Math.max(12, Math.min(e.clientX+16, innerWidth-PANEL-r.width-16))+'px';
+  tip.style.top =Math.max(12, Math.min(e.clientY+16, innerHeight-r.height-16))+'px';
+}
+cv.addEventListener('mousedown',e=>{
+  const [x,y]=ptOf(e);
+  drag={x,y,ox,oy,yaw,pitch}; cv.style.cursor='grabbing';
+});
+addEventListener('mouseup',()=>{ drag=null; cv.style.cursor='grab'; });
+cv.addEventListener('mousemove',e=>{
+  const [mx,my]=ptOf(e);
+  if (drag){
+    if (mode3d){
+      yaw   = drag.yaw   + (mx-drag.x)*0.006;
+      pitch = Math.max(-1.35, Math.min(1.35, drag.pitch + (my-drag.y)*0.006));
+    } else {
+      ox = drag.ox+(mx-drag.x); oy = drag.oy+(my-drag.y);
+    }
+    draw(); return;
+  }
+  const n=hit(mx,my);
+  if (n!==hover){ hover=n; draw(); }
+  if (n) showTip(n,e); else tip.style.display='none';
+});
+cv.addEventListener('mouseleave',()=>{ hover=null; tip.style.display='none'; draw(); });
+cv.addEventListener('click',e=>{
+  const [mx,my]=ptOf(e); const n=hit(mx,my);
+  focus = (n && focus!==n) ? n : null;
+  syncRows(); draw();
+});
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const k=e.deltaY<0?1.12:1/1.12, [mx,my]=ptOf(e);
+  if (!mode3d){ ox=mx-(mx-ox)*k; oy=my-(my-oy)*k; }
+  zoom*=k; draw();
+},{passive:false});
+addEventListener('keydown',e=>{
+  if (e.key==='Escape'){ focus=null; syncRows(); draw(); }
+  if (e.key==='f'||e.key==='F'){ fit(); draw(); }
+  if (e.key==='d'||e.key==='D'){ mode3d=!mode3d; fit(); syncHint(); draw(); }
+});
+</script>
+</body>
+</html>

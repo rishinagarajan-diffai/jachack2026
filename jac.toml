@@ -1,0 +1,13 @@
+[project]
+name = "patient_zero"
+version = "0.1.0"
+description = "Headless Jac API service (server walkers, no client)"
+entry-point = "main.sv.jac"
+kind = "service"
+
+[dependencies]
+requests = "~=2.34"
+types-requests = "~=2.33"
+
+[dev-dependencies]
+watchdog = ">=3.0.0"
